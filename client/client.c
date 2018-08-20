@@ -16,6 +16,7 @@ int main(int argc, char **argv)
 //	}
 
 	host = "192.168.100.2";
+//	host = "127.0.0.1";
 	port = "8888";
 
 	clientfd = open_clientfd(host, port);
@@ -37,7 +38,7 @@ int main(int argc, char **argv)
 		select(clientfd + 1, &ready_set, NULL, NULL, NULL);
 
 		if(FD_ISSET(clientfd, &ready_set)){
-			if((n = rio_recv(clientfd, buf, MAXLINE)) > 0){
+			if((n = recv(clientfd, buf, MAXLINE, 0)) > 0){
 				fputs(buf, stdout);
 				fputs("\n", stdout);
 			} else {
@@ -48,7 +49,7 @@ int main(int argc, char **argv)
 
 		if(FD_ISSET(STDIN_FILENO, &ready_set)){
 			fgets(buf, MAXLINE, stdin);
-			rio_send(clientfd, buf, strlen(buf));
+			send(clientfd, buf, strlen(buf), 0);
 		}
 	}
 

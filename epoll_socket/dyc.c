@@ -8,7 +8,6 @@ ssize_t rio_readn(int fd, void *usrbuf, size_t n)
 	size_t nleft = n;
 	ssize_t nread;
 	char *bufp = usrbuf;
-	int res;
 
 	while ( nleft > 0){
 		if( (nread = read(fd, bufp, nleft)) < 0){
@@ -18,7 +17,7 @@ ssize_t rio_readn(int fd, void *usrbuf, size_t n)
 			} else {
 				return -1;
 			}
-		} else if( nread == 0){
+		} else if( nread == 0){// EOF
 			break;
 		}
 
@@ -60,21 +59,22 @@ void rio_readinitb(rio_t *rp, int fd)
 	rp->rio_bufptr = rp->rio_buf;
 }
 
-static ssize_t rio_read(rio_t *rp, char *usrbuf, size_t n)
+ssize_t rio_read(rio_t *rp, char *usrbuf, size_t n)
 {
-	int cnt;
+	ssize_t cnt;
 
 	while (rp->rio_cnt <= 0){// Refill if buf is empty
 		rp->rio_cnt = read(rp->rio_fd, rp->rio_buf, sizeof(rp->rio_buf));
 		if(rp->rio_cnt < 0){
-			if(errno != EINTR)
+			if(errno != EINTR){
 				return -1;
-		} else if(rp->rio_cnt == 0)
+			}
+		} else if(rp->rio_cnt == 0){// EOF
 			return 0;
-		else
+		} else {
 			rp->rio_bufptr = rp->rio_buf; // Reset buffer ptr
+		}
 	}
-
 
 	// copy min(n, rp->rio_cnt) bytes from internal buf to user buf
 	cnt = n;
@@ -85,35 +85,35 @@ static ssize_t rio_read(rio_t *rp, char *usrbuf, size_t n)
 	memcpy(usrbuf, rp->rio_bufptr, cnt);
 	rp->rio_bufptr += cnt;
 	rp->rio_cnt -= cnt;
-
 	return cnt;
 }
 
 ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen){
-	int n, rc;
+	int n;
+	ssize_t rc;
 	char c, *bufp = usrbuf;
 
 	for (n = 1; n < maxlen; ++n) {
-		rc = rio_read(rp, &c, 1);
-		if( rc == 1){
+		if( (rc = rio_read(rp, &c, 1)) == 1){
+
 			*bufp++ = c;
-			if(c == '\n'){
+			if(c == '\n' || c == '\0'){
 				n++;
 				break;
 			}
-		} else if(rc == 0){// EOF
-			if(n == 1)
-				return 0;// EOF , no data read
-			else
+		} else if(rc == 0){
+			if(n == 1){
+				return 0;
+			} else {
 				break;
-		} else
+			}
+		} else {
 			return -1;// error
-
+		}
 	}
 	*bufp = 0;
 	return n - 1;
 }
-
 
 ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n)
 {
@@ -134,58 +134,6 @@ ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n)
 	}
 
 	return (n - nleft);
-}
-
-
-ssize_t rio_recv(int fd, void *usrbuf, size_t n)
-{
-	size_t nleft = n;
-	ssize_t nread;
-	char *bufp = usrbuf;
-
-	while (nleft > 0)
-	{
-		if((nread = recv(fd, bufp, nleft, 0)) < 0){
-			if(errno == EINTR){
-				nread = 0;
-			} else {
-				nread = 1;
-			}
-		} else if(nread == 0){//close
-			return 0;
-		}
-
-		nleft -= nread;
-		bufp += nread;
-
-		if(bufp[nread-1] == EOF){
-			break;
-		}
-	}
-
-	return n - nleft;
-}
-
-ssize_t rio_send(int fd, void *usrbuf, size_t n)
-{
-	size_t nleft = n;
-	ssize_t nwrite;
-	char *bufp = usrbuf;
-
-	while (nleft > 0)
-	{
-		if((nwrite = send(fd, usrbuf, nleft, 0)) <= 0){
-			if(errno == EINTR){
-				nwrite = 0;
-			} else {
-				return -1;
-			}
-		}
-
-		nleft -= nwrite;
-		bufp += nwrite;
-	}
-	return n;
 }
 
 int open_clientfd(char *hostname, char *port)
@@ -281,4 +229,69 @@ int open_listenfd(char *port)
 	}
 
 	return listenfd;
+}
+
+ssize_t rio_recv(int fd, void *usrbuf, size_t n)
+{
+	size_t nleft = n;
+	ssize_t nread;
+	char *bufp = usrbuf;
+
+	while (nleft > 0)
+	{
+		if((nread = recv(fd, bufp, nleft, 0)) < 0){
+			if(errno == EINTR){
+				nread = 0;
+			} else {
+				nread = 1;
+			}
+		} else if(nread == 0){//close
+			return 0;
+		}
+
+		printf("rio_recv: %s \n", bufp);
+
+		nleft -= nread;
+		bufp += nread;
+
+		if(bufp[nread-1] == '\0'){
+			break;
+		}
+	}
+
+	printf("rio_recv: 收到并返回\n");
+	return n - nleft;
+}
+
+ssize_t rio_send(int fd, void *usrbuf, size_t n)
+{
+	size_t nleft = n;
+	ssize_t nwrite;
+	char *bufp = usrbuf;
+
+	while (nleft > 0)
+	{
+		if((nwrite = send(fd, usrbuf, nleft, 0)) <= 0){
+			if(errno == EINTR){
+				nwrite = 0;
+			} else {
+				return -1;
+			}
+		}
+
+		nleft -= nwrite;
+		bufp += nwrite;
+	}
+	return n;
+}
+
+
+void P(sem_t *s)
+{
+	sem_wait(s);
+}
+
+void V(sem_t *s)
+{
+	sem_post(s);
 }
